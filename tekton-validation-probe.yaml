@@ -1,0 +1,32 @@
+# want to confirm the tekton behaviour on a cluster
+# results will be used to determine how the attest step is pathed
+# only run one time once the account has been chosen/linked in staging
+# tekton before v1.14 rejects a step that has its own step results and also writes a task result by
+# its $(results.X.path) variable (tektoncd/pipeline issue #8255).
+# harness.sh sends it as a server-side dry run, so the cluster validates it and then discards it; nothing runs.
+#   Accepted: the fix is present (v1.14 or later).
+#   "non-existent variable": an older Tekton.
+# The attest step avoids the pattern, so either answer is fine
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: stoneintg-1803-validation-probe-
+  namespace: REPLACE-NAMESPACE
+spec:
+  pipelineSpec:
+    tasks:
+      - name: probe
+        taskSpec:
+          results:
+            - name: X
+              type: string
+          steps:
+            - name: probe
+              image: quay.io/konflux-ci/task-runner:3.2.0@sha256:ba5789d2bc04146431e492083c67b86de26d5b17891dc27f67db850a397b66d3
+              results:
+                - name: Y
+                  type: string
+              script: |
+                #!/usr/bin/env bash
+                printf x > "$(results.X.path)"
+                printf y > "$(step.results.Y.path)"
