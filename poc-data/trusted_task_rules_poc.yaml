@@ -1,0 +1,16 @@
+# attestation proof of concept: one extra allow group for Conforma's trusted-task rules.
+#
+# Loaded as a DATA SOURCE (policy.yaml lists ./poc-data), so it merges with the rule groups from
+# github.com/release-engineering/rhtap-ec-policy//data instead of replacing them. Putting the same
+# block under a source's ruleData: replaces rhtap's whole trusted_task_rules key, which drops the
+# Konflux allow rule and every deny rule.
+#
+# Key format Conforma builds for a git-resolved task: git+<url, with .git added if missing>//<pathInRepo>
+# (conforma/policy@2b85d8b policy/lib/tekton/refs.rego:52-69). The revision is not part of the key.
+# Matching is a case-sensitive glob (policy/lib/tekton/trusted.rego:398-414), so the url in the
+# PipelineRun must spell the owner exactly "Josh-Everett".
+rule_data:
+  trusted_task_rules:
+    allow:
+      stoneintg-1803-poc:
+        - pattern: "git+https://github.com/Josh-Everett/konflux-test-tasks.git//task/clamav-scan/*"

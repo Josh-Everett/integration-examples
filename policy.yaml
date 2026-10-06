@@ -18,6 +18,8 @@ sources:
       - "github.com/release-engineering/rhtap-ec-policy//data?ref=52782c948bdda990cab6067bb7ab325bbf9e73dd"
       - "oci::quay.io/konflux-ci/tekton-catalog/data-acceptable-bundles:latest"
       - "oci::quay.io/konflux-ci/integration-service-catalog/data-acceptable-bundles:latest"
+      # one extra trusted-task allow group for the fork; merges with rhtap's rules
+      - ./poc-data
     config:
       include:
         - test_attestation
