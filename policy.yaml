@@ -1,6 +1,7 @@
 # Same trust data as the production default policy, but:
 # the rules are pinned by digest to Conforma's main-built bundle git-0111fd0e (built 2026-09-17),
 # only the test-result rules run, plus the known-attestation-type check
+# and the proof-of-concept probe (./probe), which only adds warnings
 
 # The key file comes from harness.sh. The publicKey line below only works with a kubeconfig logged
 # in to stone-stage-p01; --public-key overrides it.
@@ -12,6 +13,7 @@ sources:
     policy:
       # conforma/release-policy:git-0111fd0e
       - "oci::quay.io/conforma/release-policy@sha256:2df9ba13162aded3e3eda3165530e68871fe6ac095c9b3d77b9dd711a51006eb"
+      - ./probe
     data:
       - "github.com/release-engineering/rhtap-ec-policy//data?ref=52782c948bdda990cab6067bb7ab325bbf9e73dd"
       - "oci::quay.io/konflux-ci/tekton-catalog/data-acceptable-bundles:latest"
@@ -20,3 +22,4 @@ sources:
       include:
         - test_attestation
         - attestation_type.known_attestation_type
+        - poc_probe
