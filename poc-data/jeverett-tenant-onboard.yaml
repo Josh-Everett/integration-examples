@@ -1,0 +1,56 @@
+# First component in jeverett-tenant on Konflux staging (stone-stg-rh01).
+#
+# Apply with:
+#   oc apply -f poc-data/jeverett-tenant-onboard.yaml
+#   Default build  docker-build-oci-ta (cluster default; left unset below)
+#   Image path     quay.io/redhat-user-workloads-stage/<tenant>/<component>
+#
+# Prerequisites, in this order:
+# in tandem with https://github.com/Josh-Everett/konflux-hello
+
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Application
+metadata:
+  name: jeverett-sandbox
+  namespace: jeverett-tenant
+spec:
+  displayName: jeverett-sandbox
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Component
+metadata:
+  name: konflux-hello
+  namespace: jeverett-tenant
+  annotations:
+    # Opens a pull request on the source repo adding .tekton/ definitions.
+    # Use configure-pac-no-mr instead to write those files by hand.
+    build.appstudio.openshift.io/request: configure-pac
+    git-provider: github
+    git-provider-url: https://github.com
+spec:
+  application: jeverett-sandbox
+  componentName: konflux-hello
+  source:
+    git:
+      url: https://github.com/Josh-Everett/konflux-hello.git
+      revision: main
+      context: ./
+      dockerfileUrl: Containerfile
+  # containerImage is deliberately omitted. The ImageRepository below owns it,
+  # and the image controller writes the resolved pullspec back onto this
+  # Component's status.
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ImageRepository
+metadata:
+  name: konflux-hello
+  namespace: jeverett-tenant
+  annotations:
+    image-controller.appstudio.redhat.com/update-component-image: 'true'
+  labels:
+    appstudio.redhat.com/application: jeverett-sandbox
+    appstudio.redhat.com/component: konflux-hello
+spec:
+  image:
+    name: jeverett-tenant/konflux-hello
+    visibility: public
