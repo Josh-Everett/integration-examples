@@ -18,13 +18,17 @@ spec:
       - name: probe
         taskSpec:
           results:
-            - name: X
+            # Both names are quoted. Unquoted, YAML 1.1 reads Y as the boolean true, and the
+            # request is refused by the tekton-kueue webhook with "cannot unmarshal bool into
+            # Go struct field StepResult...steps.results.name of type string" before Tekton's
+            # variable validation ever runs, so the probe answers nothing (seen 2026-10-07).
+            - name: "X"
               type: string
           steps:
             - name: probe
               image: quay.io/konflux-ci/task-runner:3.2.0@sha256:ba5789d2bc04146431e492083c67b86de26d5b17891dc27f67db850a397b66d3
               results:
-                - name: Y
+                - name: "Y"
                   type: string
               script: |
                 #!/usr/bin/env bash

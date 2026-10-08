@@ -3,8 +3,9 @@
 # only the test-result rules run, plus the known-attestation-type check
 # and the proof-of-concept probe (./probe), which only adds warnings
 
-# The key file comes from harness.sh. The publicKey line below only works with a kubeconfig logged
-# in to stone-stage-p01; --public-key overrides it.
+# The key file comes from harness.sh. The publicKey line below needs a kubeconfig logged in to a
+# cluster that exposes the Chains key at that path; on stone-stg-rh01 it is a readable Secret
+# (verified 2026-10-07). --public-key overrides it, which is what the scripts do.
 name: stoneintg-1803-poc
 description: clamav-scan test-result attestation proof of concept
 publicKey: k8s://openshift-pipelines/public-key

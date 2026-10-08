@@ -1,0 +1,149 @@
+# STONEINTG-1803 proof of concept, first pass: a PipelineRun created directly in the tenant namespace.
+# Create it with `scripts/force.sh <"" | FAILURE | SUCCESS> | oc create -f -`
+# (generateName needs create, not apply).
+#
+# The run values below are filled in for stone-stg-rh01, all read live on 2026-10-07. What each one is:
+#   namespace          jeverett-tenant, the tenant namespace (from the UI URL /ns/<name>)
+#   image-url          bare repository of the component, no tag and no digest, exactly as
+#                      ImageRepository .status.image.url prints it (org confirmed on stone-stg-rh01)
+#   image-digest       an image that konflux-hello's push pipeline built on this cluster
+#   taskRef revision   40-character commit of the PoC branch on github.com/Josh-Everett/konflux-test-tasks
+#   poc-force-result   the only value that varies between runs; scripts/force.sh rewrites it and
+#                      verifies the rewrite landed, so a missed substitution cannot pass for a real run
+#
+# RESULT, stone-stg-rh01, 2026-10-08. All five checks pass against image
+# sha256:665744bb..., with konflux-integration-runner shaped as described under serviceAccountName.
+#   1 statement is a referrer    PASS  scripts/check-referrer.sh
+#   2 Chains signs it            PASS  signed=true, 0 retries, 8-13s after completionTime;
+#                                      sha256-<statement>.att exists with a DSSE envelope layer
+#   3 Conforma verifies it       PASS  poc_probe.verified_test_statement, no violations
+#   4 a FAILED result is caught  PASS  poc-force-result=FAILURE gives ec exit 1 and
+#                                      test_attestation.no_failed_tests term=clamav-scan
+#   5 a rerun supersedes         PASS  three signed statements on one image
+#                                      (PASSED 00:19:17, FAILED 00:24:35, PASSED 00:26:24); the
+#                                      latest wins, ec exit 0 (conforma/policy PR #1817)
+#
+# Note on check 4: poc-force-result changes the attested result only. The TaskRun's own TEST_OUTPUT
+# still reads SUCCESS on a FAILURE run, so read the statement, not the TaskRun result, to confirm it.
+#
+# Environment facts confirmed by the same runs: tekton-kueue adds
+# kueue.x-k8s.io/queue-name=pipelines-queue on its own, so the fallback label below stays commented
+# out; the pod is admitted under appstudio-pipelines-scc with SETFCAP on the scan step; and this
+# cluster's Tekton predates the fix for tektoncd/pipeline #8255 (tekton-validation-probe.yaml
+# answers "non-existent variable"), which does not matter because the attest step writes the
+# literal /tekton/results/TEST_OUTPUT path.
+#
+# Why these choices:
+# - One pipeline task only. Conforma keeps a statement only when every task in the run's provenance is
+#   trusted (conforma/policy@2b85d8b policy/lib/intoto/trust.rego:71-74, :115-125). Any extra task must
+#   also match an allow rule, or the statement is dropped for a reason unrelated to clamav.
+# - The task is git-resolved from the fork, so its key is
+#   git+https://github.com/Josh-Everett/konflux-test-tasks.git//task/clamav-scan/0.3/clamav-scan.yaml,
+#   which the kit's poc-data allow pattern matches (tested with ec v0.10.22, 2026-09-29, with and without
+#   the .git suffix on the url). The owner is matched case-sensitively: keep "Josh-Everett".
+# - revision is a full commit, not a branch name, so the run is reproducible and the provenance names
+#   exactly what ran.
+# - serviceAccountName is konflux-integration-runner, not the component's build account. Changed
+#   2026-10-07 for the stone-stg-rh01 run. The scan step adds SETFCAP
+#   (konflux-test-tasks@bf74200 task/clamav-scan/0.3/clamav-scan.yaml:53-55) and only
+#   appstudio-pipelines-scc allows that. The kit originally used the build account because no
+#   hand-made account can get the constraint. That is true on stone-stage-p01, which takes the
+#   konflux-operator's konflux-integration-runner role with no securitycontextconstraints rule.
+#   It is not true here: on stone-stg-rh01 that ClusterRole grants use on appstudio-pipelines-scc
+#   (read live 2026-10-07) and the namespace already has a konflux-integration-runner account bound
+#   to it, so no new binding is needed. A hand-made account is still impossible; a tenant's
+#   RoleBinding to that role is refused as escalation (server dry run, 2026-10-07).
+#   Running as the integration account is what lets this say anything about the integration-account
+#   path (STONEINTG-1799). Two caveats for the write-up: this account is namespace-wide, not
+#   per-component, so per-component isolation is untested; and a pass here does not carry to
+#   operator-managed clusters, where the role lacks the rule.
+#
+#   THE ACCOUNT NEEDS BOTH SECRET LISTS SHAPED CORRECTLY, and they are read by different consumers.
+#   Established on stone-stg-rh01 2026-10-08 over four runs that changed only the ServiceAccount:
+#
+#     .secrets          must contain the component PUSH secret. select-oci-auth builds the task's
+#                       auth.json from this list, and that is what the scan step's `oras attach`
+#                       uses. Link it with:
+#                         oc secrets link konflux-integration-runner konflux-hello-image-push -n <ns>
+#     imagePullSecrets  must NOT contain any other credential for the same registry. Tekton Chains
+#                       builds its keychain from BOTH lists, and a pull-only quay.io entry here
+#                       wins over the push secret in .secrets. Chains then fails every retry with
+#                         writing attestations: POST https://quay.io/v2/<repo>/blobs/uploads/: UNAUTHORIZED
+#                       and sets chains.tekton.dev/signed=failed, while the task step still
+#                       succeeds and the statement is still attached as a referrer. The split is
+#                       the tell: statement present, signature absent.
+#
+#   What isolates it to imagePullSecrets rather than ordering: with .secrets reduced to the push
+#   secret alone, Chains still failed; with a pull secret added back to .secrets but the quay
+#   entries removed from imagePullSecrets, Chains succeeded on the first try with 0 retries. The
+#   build account has always signed correctly and carries only its own dockercfg in
+#   imagePullSecrets, which is the same shape. Reordering .secrets does not help and breaks the
+#   task step: select-oci-auth merges in list order with later entries winning, so putting the push
+#   secret first lets a later pull entry override it and `oras attach` fails UNAUTHORIZED instead.
+#   harness.sh prints both lists for this account and for the build account, side by side.
+# - attest-test-result is "true" here. The task default is "false"; leaving it out skips the new step and
+#   every check fails for a reason unrelated to the design.
+# - poc-force-result: leave "" for a natural result. Set FAILURE or SUCCESS only for the verdict and rerun
+#   checks (see the plan). Remove it if the PoC-only param was not added to the branch.
+# - No pipeline-level results. A pipeline result that reads TEST_OUTPUT would mark the run failed with
+#   CouldntGetPipelineResult whenever the scan step exits 0 without writing TEST_OUTPUT
+#   (tektoncd/pipeline@0f6f063e1 pkg/reconciler/pipelinerun/pipelinerun.go:974-985); scripts/show-run.sh
+#   reads the TaskRun results directly.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: clamav-attest-poc-
+  namespace: jeverett-tenant
+  labels:
+    stoneintg-1803/poc: "attest"
+    # tekton-kueue is expected to add kueue.x-k8s.io/queue-name itself [verify in step 2].
+    # If a run sits Pending with no TaskRuns, uncomment:
+    # kueue.x-k8s.io/queue-name: pipelines-queue
+spec:
+  timeouts:
+    pipeline: 2h0m0s
+  taskRunTemplate:
+    serviceAccountName: konflux-integration-runner
+  params:
+    - name: image-url
+      value: quay.io/redhat-user-workloads-stage/jeverett-tenant/konflux-hello
+    - name: image-digest
+      value: sha256:665744bb9bc38a1a97218f9e9bf8d805613e155a5a268521a4a420f088fb16d9
+    - name: attest-test-result
+      value: "true"
+    - name: poc-force-result
+      value: ""   # POC-FORCE-RESULT: "", "FAILURE" or "SUCCESS"
+  pipelineSpec:
+    params:
+      - name: image-url
+        type: string
+        description: Bare repository of the image to scan (no tag, no digest).
+      - name: image-digest
+        type: string
+        description: Digest of the image to scan.
+      - name: attest-test-result
+        type: string
+        default: "true"
+      - name: poc-force-result
+        type: string
+        default: ""
+    tasks:
+      - name: clamav-scan
+        taskRef:
+          resolver: git
+          params:
+            - name: url
+              value: https://github.com/Josh-Everett/konflux-test-tasks.git
+            - name: revision
+              value: 88f5cdf8dd7977a9ff5511bf795fa620aff89bf7
+            - name: pathInRepo
+              value: task/clamav-scan/0.3/clamav-scan.yaml
+        params:
+          - name: image-url
+            value: $(params.image-url)
+          - name: image-digest
+            value: $(params.image-digest)
+          - name: attest-test-result
+            value: $(params.attest-test-result)
+          - name: poc-force-result
+            value: $(params.poc-force-result)
